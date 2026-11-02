@@ -1319,10 +1319,22 @@ PER_CODE_LIMITS = {"plan": 40, "verify": 300, "ask": 100, "transcribe": 150}
 TOTAL_LIMITS = {"plan": 150, "verify": 1000, "ask": 300, "transcribe": 500}
 # Codes created with --record: the maintainer's own testing, which doesn't use up the testers' total.
 MAINTAINER_LIMITS = {"plan": 400, "verify": 3000, "ask": 1000, "transcribe": 1500}
+# Dollars per model from Meta's rate card, for codes created with --credit. The cached input discount is left out,
+# so a code runs out slightly early rather than late. Input and output are per million tokens.
+MODEL_PRICES = {"muse-spark-1.3": {"input_per_million": 1.25, "output_per_million": 4.25},
+                "sam-3.1": {"per_call": 0.0025},
+                "muse-voice-transcribe-1.0": {"per_minute": 0.003}}
+UNPRICED_CALL_COST = 0.02  # a model missing above still counts against a credit
+# A used up credit stops new tasks at once. The task under way may finish, up to this many dollars more.
+CREDIT_MARGIN = 0.25
 
 
 class LimitReached(Exception):
     """A code or all codes together used today's allowance for one kind of request."""
+
+
+class CreditUsed(LimitReached):
+    """A code created with --credit used up its dollars. Unlike a daily limit, this doesn't come back."""
 
 
 def normalize_code(code: str) -> str:
@@ -1339,6 +1351,7 @@ class Invites:
     def __init__(self, folder: Path, per_code: dict | None = None, total: dict | None = None):
         self.path = folder / "guide-invites.json"
         self.usage_path = folder / "guide-usage.json"
+        self.credit_path = folder / "guide-credit.json"
         self.per_code = per_code or PER_CODE_LIMITS
         self.total = total or TOTAL_LIMITS
         self.lock = threading.Lock()
@@ -1355,12 +1368,14 @@ class Invites:
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=1))
         temporary.replace(path)
 
-    def create(self, name: str, record: bool = False) -> tuple[str, dict]:
+    def create(self, name: str, record: bool = False, credit: float | None = None) -> tuple[str, dict]:
         code = "-".join("".join(secrets.choice(CODE_ALPHABET) for _ in range(4)) for _ in range(3))
         with self.lock:
             data = self._load(self.path, {"invites": []})
             invite = {"id": secrets.token_hex(4), "name": name, "hash": code_hash(code), "record": record,
                       "created": datetime.now().isoformat(timespec="seconds"), "revoked": False}
+            if credit is not None:
+                invite["credit"] = credit
             data["invites"].append(invite)
             self._save(self.path, data)
         return code, invite
@@ -1387,6 +1402,11 @@ class Invites:
     def consume(self, invite: dict, kind: str) -> None:
         """Count one request of `kind`, or raise LimitReached when today's allowance is used up."""
         with self.lock:
+            credit = invite.get("credit")
+            if credit is not None:
+                spent = self._load(self.credit_path, {}).get(invite["id"], 0)
+                if spent >= (credit if kind == "plan" else credit + CREDIT_MARGIN):
+                    raise CreditUsed(kind)
             today = date.today().isoformat()
             usage = self._load(self.usage_path, {})
             if usage.get("date") != today:
@@ -1396,12 +1416,28 @@ class Invites:
             limit = MAINTAINER_LIMITS if maintainer else self.per_code
             if mine.get(kind, 0) >= limit.get(kind, 0):
                 raise LimitReached(kind)
-            if not maintainer and usage["total"].get(kind, 0) >= self.total.get(kind, 0):
+            # A credit already caps what a code can cost, and it must not use up the total other codes rely on.
+            counted = not maintainer and credit is None
+            if counted and usage["total"].get(kind, 0) >= self.total.get(kind, 0):
                 raise LimitReached(kind)
             mine[kind] = mine.get(kind, 0) + 1
-            if not maintainer:
+            if counted:
                 usage["total"][kind] = usage["total"].get(kind, 0) + 1
             self._save(self.usage_path, usage)
+
+    def charge(self, invite: dict, calls: list[dict]) -> None:
+        """Add the dollars of a request's model calls to a code created with --credit."""
+        if invite.get("credit") is None or not calls:
+            return
+        costs = (call_cost(call, MODEL_PRICES) for call in calls)
+        dollars = sum(UNPRICED_CALL_COST if cost is None else cost for cost in costs)
+        with self.lock:
+            spent = self._load(self.credit_path, {})
+            spent[invite["id"]] = round(spent.get(invite["id"], 0) + dollars, 6)
+            self._save(self.credit_path, spent)
+
+    def spent(self, invite_id: str) -> float:
+        return self._load(self.credit_path, {}).get(invite_id, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1556,6 +1592,8 @@ class GuideHandler(BaseHTTPRequestHandler):
             **({"spark": self.spark_label} if self.spark_label else {}),
             "calls": calls,
         })
+        if self.invite is not None:
+            self.server.invites.charge(self.invite, calls)
 
     def _dispatch(self) -> None:
         try:
@@ -1594,6 +1632,8 @@ class GuideHandler(BaseHTTPRequestHandler):
             return 400, {"error": {"kind": "request", "message": str(exc)}}
         if isinstance(exc, UpstreamError):
             return 502, {"error": {"kind": "upstream", "status": exc.status, "message": exc.message}}
+        if isinstance(exc, CreditUsed):
+            return 429, {"error": {"kind": "credit", "message": "This beta code has used its free allowance. Thanks for testing Kokobubu!"}}
         return 429, {"error": {"kind": "limit", "message": f"Today's limit for {exc} is used up. Try again tomorrow."}}
 
     def _stream(self, parts) -> None:
@@ -1878,6 +1918,7 @@ def main() -> None:
     invite = commands.add_parser("invite", help="create a code and print it once")
     invite.add_argument("name", help="who the code is for, as you will recognize it in the list")
     invite.add_argument("--record", action="store_true", help="allow recording mode (the maintainer only)")
+    invite.add_argument("--credit", type=float, help="dollars of model use this code may spend in total")
     revoke = commands.add_parser("revoke", help="stop a code from working")
     revoke.add_argument("id")
     commands.add_parser("list", help="list codes (never the codes themselves) and today's usage")
@@ -1893,13 +1934,13 @@ def main() -> None:
             raise SystemExit("No guide listener could start.")
         threading.Event().wait()
     if args.command == "invite":
-        code, created = invites.create(args.name, args.record)
+        code, created = invites.create(args.name, args.record, args.credit)
         print(f"Invite code for {created['name']} (id {created['id']}): {code}")
         print("Shown once: it is stored only as a hash. Limits per day: "
               + ", ".join(f"{kind} {count}" for kind, count in PER_CODE_LIMITS.items()))
     elif args.command == "usage":
         prices_file = data_dir / "model-prices.json"
-        prices = json.loads(prices_file.read_text()) if prices_file.is_file() else {}
+        prices = json.loads(prices_file.read_text()) if prices_file.is_file() else MODEL_PRICES
         summary = summarize(UsageLog(data_dir / "usage").records(args.days), prices)
         average = summary["average_task"]
         print(f"Last {args.days} days: {summary['requests']} requests, {summary['tasks']} tasks, "
@@ -1924,7 +1965,8 @@ def main() -> None:
         for item in invites.all():
             state = "revoked" if item.get("revoked") else ("record" if item.get("record") else "active")
             used = ", ".join(f"{kind} {count}" for kind, count in today.get(item["id"], {}).items()) or "no use today"
-            print(f"{item['id']}  {item['name']:<20} {state:<8} created {item['created']}  today: {used}")
+            credit = f"  spent ${invites.spent(item['id']):.2f} of ${item['credit']:.2f}" if item.get("credit") is not None else ""
+            print(f"{item['id']}  {item['name']:<20} {state:<8} created {item['created']}  today: {used}{credit}")
 
 
 if __name__ == "__main__":

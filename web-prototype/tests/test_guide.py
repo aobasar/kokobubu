@@ -13,6 +13,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -839,6 +840,39 @@ class InviteTests(unittest.TestCase):
         with self.assertRaises(guide.LimitReached):  # a kind without a limit is not allowed
             self.invites.consume(second, "ask")
 
+    def test_a_used_up_credit_stops_new_tasks_first_and_everything_after_the_margin(self):
+        invites = guide.Invites(Path(self.tmp.name), per_code={"plan": 9, "verify": 9}, total={"plan": 9, "verify": 9})
+        _, tester = invites.create("beta-01", credit=0.10)
+        spark = {"model": "muse-spark-1.3", "usage": {"prompt_tokens": 80000, "completion_tokens": 0}}  # $0.10
+        invites.consume(tester, "plan")
+        invites.charge(tester, [spark])
+        self.assertAlmostEqual(invites.spent(tester["id"]), 0.10)
+        with self.assertRaises(guide.CreditUsed):
+            invites.consume(tester, "plan")
+        invites.consume(tester, "verify")  # the task under way goes on
+        invites.charge(tester, [{"model": "sam-3.1"}] * 100)
+        invites.charge(tester, [spark])
+        with self.assertRaises(guide.CreditUsed):
+            invites.consume(tester, "verify")
+
+    def test_a_credit_code_leaves_the_total_to_the_other_codes(self):
+        _, tester = self.invites.create("beta-01", credit=2)
+        self.invites.consume(tester, "plan")
+        self.invites.consume(tester, "plan")
+        _, other = self.invites.create("jury")
+        for _ in range(2):
+            self.invites.consume(other, "plan")  # the total of 3 still has room: the credit code didn't count
+
+    def test_a_code_without_a_credit_is_never_charged(self):
+        _, jury = self.invites.create("jury")
+        self.invites.charge(jury, [{"model": "sam-3.1"}])
+        self.assertEqual(self.invites.spent(jury["id"]), 0)
+
+    def test_every_model_a_tester_can_reach_has_a_price(self):
+        for model in (guide.nova.REASONING_MODEL, guide.SAM_MODEL, guide.nova.TRANSCRIBE_MODEL):
+            self.assertIn(model, guide.MODEL_PRICES)
+        self.assertIsNotNone(guide.call_cost({"model": guide.SAM_MODEL}, guide.MODEL_PRICES))
+
 
 class InternetListenerTests(unittest.TestCase):
     def setUp(self):
@@ -911,6 +945,20 @@ class InternetListenerTests(unittest.TestCase):
         self.assertEqual(self.request("/api/guide/plan", self.frame_body(), code=self.code)[0], 200)
         status, body = self.request("/api/guide/plan", self.frame_body(), code=self.code)
         self.assertEqual((status, body["error"]["kind"]), (429, "limit"))
+
+    def test_a_used_up_credit_answers_429_and_a_plan_is_charged(self):
+        code, invite = self.invites.create("beta-01", credit=1)
+        with mock.patch.dict(guide.MODEL_PRICES, {guide.nova.REASONING_MODEL: {"per_call": 0.5}}):
+            self.assertEqual(self.request("/api/guide/plan", self.frame_body(), code=code)[0], 200)
+            for _ in range(50):  # the charge comes right after the answer is sent
+                if self.invites.spent(invite["id"]):
+                    break
+                time.sleep(0.02)
+        self.assertGreater(self.invites.spent(invite["id"]), 0)
+        self.invites._save(self.invites.credit_path, {invite["id"]: 1})
+        status, body = self.request("/api/guide/plan", self.frame_body(), code=code)
+        self.assertEqual((status, body["error"]["kind"]), (429, "credit"))
+        self.assertIn("allowance", body["error"]["message"])
 
 
 class UsageTests(unittest.TestCase):
