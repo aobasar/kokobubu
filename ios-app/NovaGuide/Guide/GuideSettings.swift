@@ -320,6 +320,9 @@ final class GuideSettings: ObservableObject {
     /// Move on by itself 5 s after a step is verified.
     @Published var autoContinue: Bool { didSet { defaults.set(autoContinue, forKey: "autoContinue") } }
     @Published var haptics: Bool { didSet { defaults.set(haptics, forKey: "haptics") } }
+    /// Beeps and short spoken hints lead the camera to the control, for use without looking at the screen. VoiceOver
+    /// turns it on by itself.
+    @Published var soundGuidance: Bool { didSet { defaults.set(soundGuidance, forKey: "soundGuidance") } }
     @Published var orientation: OrientationChoice { didSet { defaults.set(orientation.rawValue, forKey: "orientation") } }
     /// Each orientation remembers its own place for the card.
     @Published var cardPortrait: CardPlace { didSet { defaults.set(cardPortrait.rawValue, forKey: "cardPortrait") } }
@@ -369,6 +372,7 @@ final class GuideSettings: ObservableObject {
         verifyEach = defaults.object(forKey: "verifyEach") as? Bool ?? true
         autoContinue = defaults.object(forKey: "autoContinue") as? Bool ?? true
         haptics = defaults.object(forKey: "haptics") as? Bool ?? true
+        soundGuidance = defaults.bool(forKey: "soundGuidance")
         orientation = OrientationChoice(rawValue: defaults.string(forKey: "orientation") ?? "") ?? .automatic
         lens = LensChoice(rawValue: defaults.string(forKey: "lens") ?? "") ?? .widest
         highDetail = defaults.bool(forKey: "highDetail")

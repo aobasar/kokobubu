@@ -453,6 +453,12 @@ final class ARGuideController: NSObject, ObservableObject, ARSessionDelegate {
         return StepAnchor(control: control, radius: radius, label: label, precise: precise)
     }
 
+    /// How far the current step's control is from the camera, in meters; nil when its place was only guessed.
+    var currentDistance: Float? {
+        guard let index = currentStep, anchors.indices.contains(index), anchors[index].precise else { return nil }
+        return simd_distance(anchors[index].control, arView.cameraTransform.translation)
+    }
+
     /// Where a step's marker falls in a frame that was sent, 0 to 1 in the upright image; nil when it is out of that frame.
     func markerPoint(step index: Int, in capture: CapturedFrame) -> NormalizedPoint? {
         guard anchors.indices.contains(index),

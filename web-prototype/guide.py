@@ -846,6 +846,28 @@ def normalized_box(box: dict, width: int, height: int) -> dict:
             "confidence": round(box["c"], 3) if box["c"] == box["c"] else None}
 
 
+# Asked only by an app running VoiceOver or sound guidance: the person may not see the screen, so each step also says
+# how to find the control by touch. Other requests keep the plan as it was, at the same cost.
+TOUCH_RULE = """The person may not see the screen or the device. For every step also write touch: one short sentence in
+{lang}, at most 25 words, that tells them how to find the control by hand: where it is from things they can feel (an
+edge, a corner, the biggest knob, the display, a row of buttons), its place in a row counted from one side, and its
+shape or size as the photo shows it (round, long, a rocker, a knob). For a dial, say which way it turns and the
+direction of the target position as a clock face. Say only what the photo shows: never claim raised marks, Braille,
+clicks or a texture you can't see. If a hot, sharp or moving part is near the control, say so first.
+"""
+
+
+def plan_schema(touch: bool) -> dict:
+    """The plan's schema; with touch, every step also carries the touch sentence."""
+    if not touch:
+        return PLAN_SCHEMA
+    schema = copy.deepcopy(PLAN_SCHEMA)
+    item = schema["json_schema"]["schema"]["properties"]["steps"]["items"]
+    item["properties"]["touch"] = {"type": "string"}
+    item["required"].append("touch")
+    return schema
+
+
 def plan(frame: bytes, question: str, language: str, api_key: str, opener, auto_language: bool = False,
          **options) -> dict:
     """One frame and a question in, steps with normalized points and boxes out."""
@@ -855,7 +877,7 @@ def plan(frame: bytes, question: str, language: str, api_key: str, opener, auto_
 
 
 def step_entry(step: dict, target: str, label: str, point: tuple[int, int], width: int, height: int,
-               box: dict | None = None, method: str = "pending", grounded: dict | None = None) -> dict:
+               box: dict | None = None, method: str = "pending", grounded: dict | None = None, touch: bool = False) -> dict:
     check = step.get("check_view") if step.get("check_view") in CHECK_VIEWS else "close_up"
     # A photo can't show a knob pulled out or pushed in: all 15 recorded checks of such a step came back unsure.
     if step.get("motion") in ("pull", "push"):
@@ -874,6 +896,8 @@ def step_entry(step: dict, target: str, label: str, point: tuple[int, int], widt
         "motion": step.get("motion") if step.get("motion") in MOTIONS else "unknown",
         "setTo": None,
     }
+    if touch and str(step.get("touch", "")).strip():
+        entry["touch"] = str(step["touch"]).strip()
     if label:
         label_point = (grounded or {}).get(label)
         entry["setTo"] = {
@@ -1003,7 +1027,7 @@ def show_request(raw: dict) -> dict | None:
 
 def plan_parts(frame: bytes, question: str, language: str, api_key: str, opener, auto_language: bool = False,
                allow_questions: bool = False, answers: list[dict] | None = None, correction: dict | None = None,
-               findings: list[str] | None = None, shows: int = 0):
+               findings: list[str] | None = None, shows: int = 0, touch: bool = False):
     """The plan in two parts, so the app can read the first step while the controls are still being found:
     the steps with Spark's rough points ("located": false), then the steps with grounded points and SAM boxes.
     A refusal, an empty plan or a question for the person is a single, final part."""
@@ -1022,8 +1046,9 @@ def plan_parts(frame: bytes, question: str, language: str, api_key: str, opener,
     show_rule = (SHOW_RULE if may_show else NO_SHOW_RULE).format(lang=lang)
     text, model = spark(PLAN_PROMPT.format(question=question, language_rule=rule, lang=lang, max_steps=MAX_STEPS,
                                            marking=MARKING_RULE, ask_rule=ask_rule, show_rule=show_rule,
-                                           context=plan_context(answers, correction, findings)),
-                        image_url, api_key, opener, PLAN_SCHEMA)
+                                           context=plan_context(answers, correction, findings)
+                                           + (TOUCH_RULE.format(lang=lang) if touch else "")),
+                        image_url, api_key, opener, plan_schema(touch))
     timings["plan"] = round(time.monotonic() - started, 2)
     served.append(model)
     raw = parse_json(text)
@@ -1063,7 +1088,7 @@ def plan_parts(frame: bytes, question: str, language: str, api_key: str, opener,
     targets = [str(step.get("target_phrase", "")) for step in raw_steps]
     labels = [str(step.get("set_to_label", "")) for step in raw_steps]
     yield {**result, "located": False, "served": sorted(set(served)), "timings": dict(timings),
-           "steps": [step_entry(step, target, label, to_px(spark_point(step), width, height), width, height)
+           "steps": [step_entry(step, target, label, to_px(spark_point(step), width, height), width, height, touch=touch)
                      for step, target, label in zip(raw_steps, targets, labels)]}
 
     names = [name for name in dict.fromkeys(targets + labels) if name]
@@ -1090,7 +1115,7 @@ def plan_parts(frame: bytes, question: str, language: str, api_key: str, opener,
         located = list(pool.map(locate_in_worker, zip(targets, points)))
     timings["locate"] = round(time.monotonic() - started, 2)
 
-    result["steps"] = [step_entry(step, target, label, point, width, height, box, method, grounded)
+    result["steps"] = [step_entry(step, target, label, point, width, height, box, method, grounded, touch=touch)
                        for step, target, label, point, (box, method) in zip(raw_steps, targets, labels, points, located)]
     result["served"] = sorted(set(served))
     yield result
@@ -1727,7 +1752,8 @@ class GuideHandler(BaseHTTPRequestHandler):
         self._spend("plan")
         for result in plan_parts(frame, question.strip(), language, api_key, self.server.opener,
                                  body.get("autoLanguage") is True, allow_questions=body.get("allowQuestions") is True,
-                                 answers=answers, correction=correction, findings=findings, shows=shows):
+                                 answers=answers, correction=correction, findings=findings, shows=shows,
+                                 touch=body.get("nonvisual") is True):
             if result["located"] and self._may_record(body):
                 result["recording"] = record(self.server.recordings, frame, body, result)
             yield result

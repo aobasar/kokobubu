@@ -321,6 +321,25 @@ class PlanTests(unittest.TestCase):
         self.assertIn("only when their task is to run it", prompt)
         self.assertIn("detail", guide.PLAN_SCHEMA["json_schema"]["schema"]["properties"]["steps"]["items"]["required"])
 
+    def test_the_touch_sentence_is_asked_only_without_sight(self):
+        steps = [{**PLAN["steps"][0], "touch": "  The round knob at the left edge, under the display.  "}, PLAN["steps"][1]]
+        opener = RoutingOpener(plan={**PLAN, "steps": steps})
+        seen = guide.plan(tiny_jpeg(), "Beyazları yıkamak istiyorum", "Turkish", FAKE_KEY, opener)
+        body = opener.bodies[0]
+        self.assertNotIn("touch", body["response_format"]["json_schema"]["schema"]["properties"]["steps"]["items"]["properties"])
+        self.assertNotIn("find the control by hand", body["messages"][0]["content"][0]["text"])
+        self.assertNotIn("touch", seen["steps"][0])
+
+        opener = RoutingOpener(plan={**PLAN, "steps": steps})
+        felt = guide.plan(tiny_jpeg(), "Beyazları yıkamak istiyorum", "Turkish", FAKE_KEY, opener, touch=True)
+        body = opener.bodies[0]
+        item = body["response_format"]["json_schema"]["schema"]["properties"]["steps"]["items"]
+        self.assertIn("touch", item["required"])
+        self.assertIn("find the control by hand", body["messages"][0]["content"][0]["text"])
+        self.assertEqual(felt["steps"][0]["touch"], "The round knob at the left edge, under the display.")
+        self.assertNotIn("touch", felt["steps"][1])  # an empty sentence is left out
+        self.assertNotIn("touch", guide.PLAN_SCHEMA["json_schema"]["schema"]["properties"]["steps"]["items"]["required"])
+
     def test_automatic_language_follows_the_question(self):
         opener = RoutingOpener(plan={**PLAN, "question_language": "English"})
         result = guide.plan(tiny_jpeg(), "I want a normal wash", "Turkish", FAKE_KEY, opener, auto_language=True)

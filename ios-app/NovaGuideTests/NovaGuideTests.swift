@@ -1034,3 +1034,132 @@ final class FrameSharpnessTests: XCTestCase {
         XCTAssertNil(FrameSharpness.choose(scores: []))
     }
 }
+
+final class SonarCueTests: XCTestCase {
+    let size = CGSize(width: 400, height: 300)
+
+    private func marker(_ x: CGFloat, _ y: CGFloat, onScreen: Bool = true, direction: CGVector = CGVector(dx: 0, dy: -1)) -> MarkerState {
+        MarkerState(center: CGPoint(x: x, y: y), radius: 20, onScreen: onScreen, direction: direction, label: nil, precise: true)
+    }
+
+    func testTheMiddleIsCenteredWithAPlainPitch() {
+        let cue = SonarCue.make(marker(200, 150), in: size, wasCentered: false)
+        XCTAssertTrue(cue.centered)
+        XCTAssertEqual(cue.hint, .centered)
+        XCTAssertEqual(cue.pan, 0, accuracy: 1e-6)
+        XCTAssertEqual(cue.pitch, SonarCue.basePitch, accuracy: 1e-6)
+    }
+
+    func testAControlOnTheRightSoundsInTheRightEar() {
+        let cue = SonarCue.make(marker(350, 150), in: size, wasCentered: false)
+        XCTAssertFalse(cue.centered)
+        XCTAssertEqual(cue.hint, .right)
+        XCTAssertEqual(cue.pan, 0.75, accuracy: 1e-6)
+    }
+
+    func testAControlAboveSoundsHigherAndBelowLower() {
+        let above = SonarCue.make(marker(200, 30), in: size, wasCentered: false)
+        let below = SonarCue.make(marker(200, 270), in: size, wasCentered: false)
+        XCTAssertEqual(above.hint, .up)
+        XCTAssertEqual(below.hint, .down)
+        XCTAssertGreaterThan(above.pitch, SonarCue.basePitch)
+        XCTAssertLessThan(below.pitch, SonarCue.basePitch)
+    }
+
+    func testBeepsGetFasterNearerTheMiddle() {
+        let far = SonarCue.make(marker(390, 150), in: size, wasCentered: false)
+        let near = SonarCue.make(marker(260, 150), in: size, wasCentered: false)
+        XCTAssertLessThan(near.interval, far.interval)
+    }
+
+    func testAnOffScreenControlFollowsTheDirectionAtTheSlowestRate() {
+        let cue = SonarCue.make(marker(0, 0, onScreen: false, direction: CGVector(dx: -1, dy: 0)), in: size, wasCentered: false)
+        XCTAssertFalse(cue.centered)
+        XCTAssertEqual(cue.hint, .left)
+        XCTAssertEqual(cue.pan, -1, accuracy: 1e-6)
+        XCTAssertEqual(cue.interval, SonarCue.slowest, accuracy: 1e-6)
+    }
+
+    func testLeavingTheMiddleTakesAWiderStepThanComingIn() {
+        let edge = marker(200 + 200 * 0.26, 150)  // between the two zones
+        XCTAssertFalse(SonarCue.make(edge, in: size, wasCentered: false).centered)
+        XCTAssertTrue(SonarCue.make(edge, in: size, wasCentered: true).centered)
+    }
+
+    func testDistancesAreWholeInchesOrFiveCentimeterSteps() {
+        XCTAssertEqual(SoundGuidance.amount(0.42, inches: false), 40)
+        XCTAssertEqual(SoundGuidance.amount(0.43, inches: false), 45)
+        XCTAssertEqual(SoundGuidance.amount(0.01, inches: false), 5)
+        XCTAssertEqual(SoundGuidance.amount(0.3048, inches: true), 12)
+        XCTAssertEqual(SoundGuidance.amount(0.001, inches: true), 1)
+    }
+}
+
+final class HintGateTests: XCTestCase {
+    func testAnOffScreenHintIsSaidAfterItHolds() {
+        var gate = HintGate()
+        XCTAssertNil(gate.update(.left, onScreen: false, at: 0))
+        XCTAssertNil(gate.update(.left, onScreen: false, at: 0.3))
+        XCTAssertEqual(gate.update(.left, onScreen: false, at: 0.6), .left)
+        XCTAssertNil(gate.update(.left, onScreen: false, at: 1))
+    }
+
+    func testInThePictureOnlyTheBeepsLead() {
+        var gate = HintGate()
+        XCTAssertNil(gate.update(.right, onScreen: true, at: 0))
+        XCTAssertNil(gate.update(.right, onScreen: true, at: 2))
+    }
+
+    func testTheMiddleIsSaidOnceAndAgainAfterLeavingIt() {
+        var gate = HintGate()
+        XCTAssertNil(gate.update(.centered, onScreen: true, at: 0))
+        XCTAssertEqual(gate.update(.centered, onScreen: true, at: 0.4), .centered)
+        XCTAssertNil(gate.update(.centered, onScreen: true, at: 10))
+        XCTAssertNil(gate.update(.up, onScreen: true, at: 11))
+        XCTAssertNil(gate.update(.up, onScreen: true, at: 11.6))
+        XCTAssertNil(gate.update(.centered, onScreen: true, at: 12))
+        XCTAssertEqual(gate.update(.centered, onScreen: true, at: 12.4), .centered)
+    }
+
+    func testANewHintWaitsForTheGapAndTheSameOneRepeatsLater() {
+        var gate = HintGate()
+        _ = gate.update(.left, onScreen: false, at: 0)
+        XCTAssertEqual(gate.update(.left, onScreen: false, at: 0.5), .left)
+        _ = gate.update(.down, onScreen: false, at: 1)
+        XCTAssertNil(gate.update(.down, onScreen: false, at: 1.6))  // 1.1 s after the last words
+        XCTAssertEqual(gate.update(.down, onScreen: false, at: 3.1), .down)
+        XCTAssertNil(gate.update(.down, onScreen: false, at: 8))
+        XCTAssertEqual(gate.update(.down, onScreen: false, at: 9.2), .down)
+    }
+
+    func testTheMiddleIsSaidAtOnceEvenRightAfterAHint() {
+        var gate = HintGate()
+        _ = gate.update(.left, onScreen: false, at: 0)
+        XCTAssertEqual(gate.update(.left, onScreen: false, at: 0.5), .left)
+        _ = gate.update(.centered, onScreen: true, at: 0.6)
+        XCTAssertEqual(gate.update(.centered, onScreen: true, at: 0.9), .centered)
+    }
+}
+
+final class TouchHintTests: XCTestCase {
+    func testAStepCarriesTheTouchSentenceWhenTheServerSendsIt() throws {
+        let json = """
+        {"instruction": "Başlat.", "target": "start button", "success": "", "point": {"x": 0.8, "y": 0.4},
+         "box": null, "boxMethod": "none", "setTo": null, "touch": "Sağ alttaki yuvarlak düğme."}
+        """
+        let step = try JSONDecoder().decode(GuideStep.self, from: Data(json.utf8))
+        XCTAssertEqual(step.touch, "Sağ alttaki yuvarlak düğme.")
+        let older = try JSONDecoder().decode(GuideStep.self, from: Data(json.replacingOccurrences(of: #", "touch": "Sağ alttaki yuvarlak düğme.""#, with: "").utf8))
+        XCTAssertNil(older.touch)
+    }
+
+    @MainActor
+    func testTheTouchSentenceFollowsOnlyTheMiddle() {
+        let guidance = SoundGuidance()
+        let context = SoundGuidance.Context(enabled: true, active: true, busy: false, speech: true, haptics: false, marker: nil,
+                                            size: .zero, distance: nil, step: 0, touch: "The round button at the right edge.",
+                                            language: UserLanguage.named("English"))
+        XCTAssertEqual(guidance.line(for: .centered, context), "The target is straight ahead. The round button at the right edge.")
+        XCTAssertEqual(guidance.line(for: .left, context), "Turn the phone left")
+    }
+}

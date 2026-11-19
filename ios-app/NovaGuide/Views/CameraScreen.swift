@@ -68,10 +68,12 @@ struct CameraScreen: View {
             model.greet()
             ar.apply(cameraOptions)
             ar.start()
+            model.guidance.start()
             UIApplication.shared.isIdleTimerDisabled = true  // the screen stays on while the camera is in use
         }
         .onDisappear {
             ar.pause()
+            model.guidance.stop()
             UIApplication.shared.isIdleTimerDisabled = false
         }
         .onChange(of: cameraOptions) { _, options in ar.apply(options) }
@@ -79,8 +81,10 @@ struct CameraScreen: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 ar.start()
+                model.guidance.start()
             } else if phase == .background {
                 ar.pause()
+                model.guidance.stop()
                 if !screenRecorder.isDemo { screenRecorder.discard() }
             }
         }
@@ -208,6 +212,11 @@ struct CameraScreen: View {
                               card: docked ? .zero : ar.cameraRect(fromGlobal: cardFrame), aims: model.feedback != .correct,
                               showsDialLine: dialLineShown(marker))
                     .id("\(model.stepIndex)-\(markerShown)")
+                    .accessibilityHidden(true)  // TargetElement says it in words
+                if let step = model.currentStep {
+                    TargetElement(marker: marker, instruction: step.instruction, touch: step.touch ?? "",
+                                  whereIsIt: model.sayWhereItIs, again: model.repeatStep)
+                }
             }
             if model.correcting == .moving {
                 Color.clear
@@ -279,6 +288,34 @@ struct CameraScreen: View {
         case .unreachable: String(localized: "Kokobubu is not reachable", bundle: .ui)
         case .connected, .unknown: nil
         }
+    }
+}
+
+/// The step's control for VoiceOver: an element over the marker, found by touch, that says the step and which way to
+/// move the phone. Off the picture, it covers the whole camera.
+private struct TargetElement: View {
+    var marker: MarkerState
+    var instruction: String
+    /// How to find the control by hand, when the plan has it.
+    var touch: String
+    var whereIsIt: () -> Void
+    var again: () -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            let side = max(marker.radius * 2 + 44, 88)
+            let cue = SonarCue.make(marker, in: geometry.size, wasCentered: false)
+            Color.clear
+                .frame(width: marker.onScreen ? side : geometry.size.width, height: marker.onScreen ? side : geometry.size.height)
+                .position(marker.onScreen ? marker.center : CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2))
+                .accessibilityElement()
+                .accessibilityLabel(Text("Target: \(instruction)", bundle: .ui))
+                .accessibilityValue(Text(LocalizedStringKey(cue.hint.screenKey), bundle: .ui))
+                .accessibilityHint(Text(verbatim: touch))
+                .accessibilityAction(named: Text("Where is it?", bundle: .ui), whereIsIt)
+                .accessibilityAction(named: Text("Say it again", bundle: .ui), again)
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -406,6 +443,7 @@ private struct MoreMenu: View {
                 if model.phase == .guiding, model.currentStep != nil {
                     Section {
                         row("Say it again", "speaker.wave.2") { model.repeatStep() }
+                        row("Where is it?", "location.viewfinder") { model.sayWhereItIs() }
                         row("Re-evaluate", "arrow.triangle.2.circlepath") { model.reassess() }
                         row("Explain it in more detail", "text.bubble") { model.explainMore() }
                         row("The marker is in the wrong place", "scope") { model.wrongSpot() }

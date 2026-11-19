@@ -124,6 +124,9 @@ struct GuideStep: Decodable, Equatable {
 
     /// How the hand moves the control; an older server sends none, and Spark says "unknown" when it can't tell.
     var motion: String? = nil
+    /// How to find the control by hand, in the user's language; sent only when the app asked for it (VoiceOver or
+    /// sound guidance is on).
+    var touch: String? = nil
 
     /// False when nothing visible changes (a momentary press); such steps are not checked.
     var isVerifiable: Bool { check.map { $0 != "none" } ?? verifiable ?? true }

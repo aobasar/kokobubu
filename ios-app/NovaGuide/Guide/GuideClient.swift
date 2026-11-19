@@ -51,6 +51,8 @@ struct GuideClient {
         /// What earlier photos of this task showed, and how many times Kokobubu asked to see something.
         var findings: [String] = []
         var shows = 0
+        /// The user may not see the screen: each step also says how to find the control by touch.
+        var nonvisual = false
     }
 
     var baseURL: URL?
@@ -93,11 +95,11 @@ struct GuideClient {
 
     func plan(jpeg: Data, question: String, language: String, autoLanguage: Bool = false, record: Bool,
               camera: CameraInfo?, spark: SparkChoice? = nil, answers: [Answer] = [], correction: Correction? = nil,
-              allowQuestions: Bool = true, findings: [String] = [], shows: Int = 0, onSteps: @MainActor (GuidePlan) -> Void = { _ in }) async throws -> GuidePlan {
+              allowQuestions: Bool = true, findings: [String] = [], shows: Int = 0, nonvisual: Bool = false, onSteps: @MainActor (GuidePlan) -> Void = { _ in }) async throws -> GuidePlan {
         let request = PlanRequest(frame: jpeg.base64EncodedString(), question: question, language: language,
                                   autoLanguage: autoLanguage, record: record, camera: record ? camera : nil, spark: spark,
                                   allowQuestions: allowQuestions, answers: answers, correction: correction,
-                                  findings: findings, shows: shows)
+                                  findings: findings, shows: shows, nonvisual: nonvisual)
         let bytes = try await open(path: "api/guide/plan", body: try JSONEncoder().encode(request), timeout: 90)
         for try await line in bytes.lines where !line.isEmpty {
             let data = Data(line.utf8)

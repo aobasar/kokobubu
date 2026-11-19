@@ -148,6 +148,8 @@ final class GuideModel: ObservableObject {
     let router: ServerRouter
     private let speaker = Speaker()
     private let sounds = SoundEffects()
+    /// Beeps and spoken hints toward the control, for use without looking at the screen.
+    let guidance = SoundGuidance()
     private var task: Task<Void, Never>?
     private var prepared: PreparedPlan?
     private var prepareTask: Task<Void, Never>?
@@ -185,6 +187,32 @@ final class GuideModel: ObservableObject {
         spokenLanguage = settings.language
         router = ServerRouter()
         recorder.onFinish = { [weak self] wav in self?.heardRecording(wav) }
+        guidance.context = { [weak self] in self?.guidanceContext }
+    }
+
+    private var guidanceContext: SoundGuidance.Context {
+        let voiceOver = SoundGuidance.voiceOverRunning
+        let waitsForUser = phase == .guiding && correcting == nil && listening == .idle && !photoSoon && !reassessing
+            && feedback != .checking && feedback != .correct
+        return SoundGuidance.Context(
+            enabled: settings.soundGuidance || voiceOver, active: waitsForUser, busy: speaker.isSpeaking,
+            speech: settings.speakAloud || voiceOver, haptics: settings.haptics, marker: ar.marker,
+            size: ar.arView.bounds.size, distance: ar.currentDistance, step: stepIndex, touch: currentStep?.touch,
+            language: language)
+    }
+
+    /// The user may not see the screen: VoiceOver or Settings › Sound guidance is on.
+    var nonvisual: Bool { settings.soundGuidance || SoundGuidance.voiceOverRunning }
+
+    /// A step as it is read aloud: without sight, how to find the control by hand comes after the instruction.
+    func spokenStep(_ step: GuideStep) -> String {
+        guard nonvisual, let touch = step.touch, !touch.isEmpty else { return step.instruction }
+        return step.instruction + " " + touch
+    }
+
+    /// "Where is it?": which way to move the phone, or how far ahead the control is.
+    func sayWhereItIs() {
+        guidance.sayWhere()
     }
 
     /// The language Nova speaks and answers in now.
@@ -433,7 +461,7 @@ final class GuideModel: ObservableObject {
             defer { status.cancel() }
             do {
                 let language = self.language.serverName, auto = settings.isAutomaticLanguage, record = settings.record
-                let spark = settings.sparkChoice, started = Date()
+                let spark = settings.sparkChoice, started = Date(), nonvisual = self.nonvisual
                 let arrived: @MainActor (GuidePlan) -> Void = { steps in
                     status.cancel()
                     self.timings.steps = Date().timeIntervalSince(started)
@@ -448,7 +476,7 @@ final class GuideModel: ObservableObject {
                         try await $0.plan(jpeg: capture.jpeg, question: text, language: language, autoLanguage: auto,
                                           record: record, camera: capture.cameraInfo, spark: spark, answers: answers,
                                           correction: correction, allowQuestions: allowQuestions, findings: findings, shows: shows,
-                                          onSteps: arrived)
+                                          nonvisual: nonvisual, onSteps: arrived)
                     }
                 }
                 let elapsed = Date().timeIntervalSince(started)
@@ -685,13 +713,14 @@ final class GuideModel: ObservableObject {
             guard !Task.isCancelled, index == stepIndex, feedback == .correct, let capture = takePhoto() else { return }
             let waiting = PreparedPlan(capture: capture, correction: Self.continuing(plan), start: plan.steps.count)
             let text = taskQuestion, answers = self.answers, findings = self.findings, shows = self.shows, settings = self.settings
-            let language = self.language.serverName
+            let language = self.language.serverName, nonvisual = self.nonvisual
             waiting.task = Task {
                 defer { waiting.finished() }
                 return try await send {
                     try await $0.plan(jpeg: capture.jpeg, question: text, language: language, autoLanguage: settings.isAutomaticLanguage,
                                       record: settings.record, camera: capture.cameraInfo, spark: settings.sparkChoice, answers: answers,
-                                      correction: waiting.correction, allowQuestions: false, findings: findings, shows: shows) { steps in
+                                      correction: waiting.correction, allowQuestions: false, findings: findings, shows: shows,
+                                      nonvisual: nonvisual) { steps in
                         waiting.received(steps: steps)
                     }
                 }
@@ -1343,7 +1372,7 @@ final class GuideModel: ObservableObject {
     }
 
     func repeatStep() {
-        if let step = currentStep { speak(step.instruction) }
+        if let step = currentStep { speak(spokenStep(step)) }
     }
 
     /// Home, "New task here" and "Something else": back to "What do you want to do?".
@@ -1708,7 +1737,7 @@ final class GuideModel: ObservableObject {
         ar.currentStep = index
         sound(.ready)
         if let lead = stepLead, let step = currentStep {
-            speak(lead + " " + step.instruction)
+            speak(lead + " " + spokenStep(step))
         } else {
             repeatStep()
         }

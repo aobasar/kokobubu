@@ -3147,6 +3147,92 @@
           }
         }
       }
+    },
+    "Sound guidance": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sesli yönlendirme"
+          }
+        }
+      }
+    },
+    "Beeps lead the camera to the control: from the left or right ear, higher when it is above, faster as it gets closer to the middle. At the middle the phone taps once and Kokobubu says how far ahead it is. Use headphones to hear left and right. Always on while VoiceOver is running.": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bip sesleri kamerayı kontrole götürür: sol veya sağ kulaktan gelir, kontrol yukarıdaysa daha incedir, ortaya yaklaştıkça hızlanır. Ortada telefon bir kez titrer ve Kokobubu kontrolün ne kadar ileride olduğunu söyler. Sağı ve solu duymak için kulaklık takın. VoiceOver açıkken her zaman açıktır."
+          }
+        }
+      }
+    },
+    "Where is it?": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nerede?"
+          }
+        }
+      }
+    },
+    "Target: %@": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hedef: %@"
+          }
+        }
+      }
+    },
+    "In the middle of the picture": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Görüntünün ortasında"
+          }
+        }
+      }
+    },
+    "The target is straight ahead.": {
+      "comment": "Spoken by the sound guidance when the control is in the middle of the picture; {n} is a whole number.",
+      "extractionState": "manual",
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hedef tam karşınızda."
+          }
+        }
+      }
+    },
+    "The target is straight ahead, about {n} centimeters away.": {
+      "comment": "Spoken by the sound guidance when the control is in the middle of the picture; {n} is a whole number.",
+      "extractionState": "manual",
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hedef tam karşınızda, yaklaşık {n} santimetre ileride."
+          }
+        }
+      }
+    },
+    "The target is straight ahead, about {n} inches away.": {
+      "comment": "Spoken by the sound guidance when the control is in the middle of the picture; {n} is a whole number.",
+      "extractionState": "manual",
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hedef tam karşınızda, yaklaşık {n} inç ileride."
+          }
+        }
+      }
     }
   }
 }

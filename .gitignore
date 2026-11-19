@@ -36,5 +36,9 @@ ios-app/build/
 xcuserdata/
 
 # Private project notes
+CLAUDE.md
 TODO.md
 HACKATHON.md
+docs/goster-bana.md
+docs/demo-video.md
+.claude-sessions

@@ -43,6 +43,11 @@ struct SettingsView: View {
                     Text("For a more natural voice, download a Premium or Enhanced one in the iPhone's Settings › Accessibility › Read & Speak (or Spoken Content) › Voices; Kokobubu uses the best one it finds.")
                 }
                 Section {
+                    Toggle(String(localized: "Sound guidance", bundle: .ui), isOn: $settings.soundGuidance)
+                } footer: {
+                    Text("Beeps lead the camera to the control: from the left or right ear, higher when it is above, faster as it gets closer to the middle. At the middle the phone taps once and Kokobubu says how far ahead it is. Use headphones to hear left and right. Always on while VoiceOver is running.")
+                }
+                Section {
                     DisclosureGroup(String(localized: "Advanced", bundle: .ui), isExpanded: $showAdvanced) {
                         Picker(String(localized: "I speak", bundle: .ui), selection: $settings.languageName) {
                             Text("Automatic").tag(GuideSettings.automaticLanguage)
