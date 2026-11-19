@@ -31,6 +31,12 @@ manuals come first. It is not for gas, electrical panels, vehicles or medication
 
 Tell us what went wrong, and on which device. Don't film other people.
 
+### What's new in 0.2.0
+
+New: sound guidance, for using Kokobubu without looking at the screen. Beeps lead the camera to the control, the phone
+taps when it is straight ahead, and each step says how to find the control by hand. Turn it on in Settings › Sound
+guidance; it is always on while VoiceOver runs. Headphones help.
+
 ## Feedback email
 
 privacy@aobasar.com

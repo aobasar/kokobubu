@@ -13,7 +13,7 @@ Kokobubu is an iPhone app that shows you how to use a physical device. Point you
 <tr><td><b>Try on iPhone</b></td><td><a href="https://testflight.apple.com/join/jkXDy8nX">TestFlight</a>. The app requires an invitation code, because it uses API credits</td></tr>
 </table>
 
-Built for the Meta Global AI Developer Hackathon, Oct 26 – Nov 4, 2026. Track: Indie Developer. Problem statement: Build for Your World. An independent project, not made or endorsed by Meta.
+Built for the Meta Global AI Developer Hackathon, Oct 26 – Nov 4, 2026. Track: Indie Developer. Problem statement: Build for Your World. An independent project, not made or endorsed by Meta. The code as submitted is tag [v0.1.0-hackathon](https://github.com/aobasar/kokobubu/releases/tag/v0.1.0-hackathon); work on main continues after the hackathon.
 
 ## Why I built it
 
